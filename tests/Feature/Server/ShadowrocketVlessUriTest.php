@@ -36,6 +36,7 @@ class ShadowrocketVlessUriTest extends TestCase
         ]));
 
         $this->assertStringStartsWith('vless://' . self::UUID . '@', $uri);
+        $this->assertStringContainsString('tfo=1', $uri);
         $this->assertStringContainsString('encryption=test-client-encryption', $uri);
         $this->assertStringContainsString('security=tls', $uri);
         $this->assertStringContainsString('sni=example.com', $uri);
@@ -183,6 +184,97 @@ class ShadowrocketVlessUriTest extends TestCase
         $this->assertStringNotContainsString('中文 节点', $uri);
     }
 
+    public function test_vless_tcp_http_header_is_mapped_to_standard_fields(): void
+    {
+        $uri = Shadowrocket::buildVless(self::UUID, $this->makeServer([
+            'protocol_settings' => [
+                'tls' => 1,
+                'tls_settings' => ['server_name' => 'example.com'],
+                'network' => 'tcp',
+                'network_settings' => [
+                    'header' => [
+                        'type' => 'http',
+                        'request' => [
+                            'path' => ['/header-path'],
+                            'headers' => ['Host' => ['example.com']],
+                        ],
+                    ],
+                ],
+            ],
+        ]));
+
+        $this->assertStringContainsString('type=tcp', $uri);
+        $this->assertStringContainsString('headerType=http', $uri);
+        $this->assertStringContainsString('path=%2Fheader-path', $uri);
+        $this->assertStringContainsString('host=example.com', $uri);
+
+        $query = $this->parseQuery($uri);
+        $this->assertSame('tcp', $query['type']);
+        $this->assertSame('http', $query['headerType']);
+        $this->assertSame('/header-path', $query['path']);
+        $this->assertSame('example.com', $query['host']);
+
+        $this->assertStringNotContainsString('obfs=', $uri);
+        $this->assertStringNotContainsString('obfsParam=', $uri);
+    }
+
+    public function test_vless_tcp_plain_header_emits_no_header_fields(): void
+    {
+        $uri = Shadowrocket::buildVless(self::UUID, $this->makeServer([
+            'protocol_settings' => [
+                'tls' => 1,
+                'tls_settings' => ['server_name' => 'example.com'],
+                'network' => 'tcp',
+                'network_settings' => [
+                    'header' => ['type' => 'none'],
+                ],
+            ],
+        ]));
+
+        $this->assertStringContainsString('type=tcp', $uri);
+        $this->assertStringNotContainsString('headerType=', $uri);
+        $this->assertStringNotContainsString('path=', $uri);
+        $this->assertStringNotContainsString('obfs=', $uri);
+    }
+
+    public function test_vless_kcp_keeps_transport_and_uses_header_type_and_seed(): void
+    {
+        $uri = Shadowrocket::buildVless(self::UUID, $this->makeServer([
+            'protocol_settings' => [
+                'network' => 'kcp',
+                'network_settings' => [
+                    'seed' => 'test-seed',
+                    'header' => ['type' => 'srtp'],
+                ],
+            ],
+        ]));
+
+        $this->assertStringContainsString('type=kcp', $uri);
+        $this->assertStringContainsString('headerType=srtp', $uri);
+        $this->assertStringContainsString('seed=test-seed', $uri);
+
+        $query = $this->parseQuery($uri);
+        $this->assertSame('kcp', $query['type']);
+        $this->assertSame('srtp', $query['headerType']);
+        $this->assertSame('test-seed', $query['seed']);
+
+        $this->assertStringNotContainsString('obfs=kcp', $uri);
+    }
+
+    public function test_vless_tfo_is_emitted(): void
+    {
+        $uri = Shadowrocket::buildVless(self::UUID, $this->makeServer([
+            'protocol_settings' => [
+                'tls' => 1,
+                'tls_settings' => ['server_name' => 'example.com'],
+                'network' => 'tcp',
+            ],
+        ]));
+
+        $this->assertStringContainsString('tfo=1', $uri);
+        $this->assertStringNotContainsString('remark=', $uri);
+    }
+
     private function makeServer(array $overrides = []): array
     {
         return array_merge([
@@ -191,5 +283,19 @@ class ShadowrocketVlessUriTest extends TestCase
             'port' => 443,
             'protocol_settings' => [],
         ], $overrides);
+    }
+
+    private function parseQuery(string $uri): array
+    {
+        $query = parse_url(trim($uri), PHP_URL_QUERY);
+        $result = [];
+        foreach (explode('&', (string) $query) as $pair) {
+            if ($pair === '') {
+                continue;
+            }
+            [$key, $value] = array_pad(explode('=', $pair, 2), 2, '');
+            $result[$key] = rawurldecode($value);
+        }
+        return $result;
     }
 }

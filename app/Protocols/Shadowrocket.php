@@ -178,6 +178,7 @@ class Shadowrocket extends AbstractProtocol
         $name = $server['name'];
 
         $config = [
+            'tfo' => 1,
             'security' => '',
             'encryption' => match (data_get($protocol_settings, 'encryption.enabled')) {
                 true => data_get($protocol_settings, 'encryption.encryption') ?: 'none',
@@ -215,6 +216,14 @@ class Shadowrocket extends AbstractProtocol
         }
         // 处理传输协议
         switch (data_get($protocol_settings, 'network')) {
+            case 'tcp':
+                // 标准 VLESS URI 用 headerType 表示 TCP(RAW) 的 HTTP 伪装头
+                if (data_get($protocol_settings, 'network_settings.header.type', 'none') !== 'none') {
+                    $config['headerType'] = data_get($protocol_settings, 'network_settings.header.type');
+                    $config['path'] = \Illuminate\Support\Arr::random(data_get($protocol_settings, 'network_settings.header.request.path', ['/']));
+                    $config['host'] = \Illuminate\Support\Arr::random(data_get($protocol_settings, 'network_settings.header.request.headers.Host', ['www.example.com']));
+                }
+                break;
             case 'ws':
                 if ($path = data_get($protocol_settings, 'network_settings.path')) {
                     $config['path'] = $path;
@@ -238,10 +247,11 @@ class Shadowrocket extends AbstractProtocol
                 }
                 break;
             case 'kcp':
-                if ($path = data_get($protocol_settings, 'network_settings.seed')) {
-                    $config['path'] = $path;
+                // KCP 的 header 与 seed 使用独立字段，不能覆盖 type 表示的 transport
+                $config['headerType'] = data_get($protocol_settings, 'network_settings.header.type', 'none');
+                if ($seed = data_get($protocol_settings, 'network_settings.seed')) {
+                    $config['seed'] = $seed;
                 }
-                $config['type'] = data_get($protocol_settings, 'network_settings.header.type', 'none');
                 break;
             case 'httpupgrade':
                 if ($path = data_get($protocol_settings, 'network_settings.path')) {
